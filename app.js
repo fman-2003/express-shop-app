@@ -1,4 +1,4 @@
-require('dotenv').config();
+require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
@@ -9,6 +9,8 @@ const csrf = require("csurf");
 const flash = require("connect-flash");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
+const helmet = require("helmet");
+const morgan = require("morgan");
 
 const adminRoutes = require("./routes/admin");
 const shopRoutes = require("./routes/shop");
@@ -24,8 +26,10 @@ const User = require("./models/user");
 // const Order = require("./models/order");
 // const OrderItem = require("./models/order-item");
 
-const MONGODB_URI = process.env.MONGODB_URI
+const MONGODB_URI = process.env.MONGODB_URI;
 const app = express();
+app.set("trust proxy", 1);
+app.use(helmet());
 const store = new MongoDBStore({
   uri: MONGODB_URI,
   collection: "sessions",
@@ -54,6 +58,9 @@ const fileStorage = multer.diskStorage({
   },
 });
 
+const logFormat = process.env.NODE_ENV === "production" ? "combined" : "dev";
+app.use(morgan(logFormat));
+
 app.set("view engine", "ejs");
 app.set("views", "views");
 
@@ -67,6 +74,12 @@ app.use(
     resave: false,
     saveUninitialized: false,
     store,
+    cookie: {
+      maxAge: 1000 * 60 * 60 * 24,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      httpOnly: true,
+    },
   }),
 );
 app.use(csrfProtection);
