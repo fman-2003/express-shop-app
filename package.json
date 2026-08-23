@@ -8,7 +8,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon app.js"
+    "dev": "nodemon app.js",
+    "start": "node app.js"
   },
   "dependencies": {
     "@paystack/inline-js": "^2.22.8",
