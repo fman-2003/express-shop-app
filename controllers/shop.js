@@ -41,21 +41,24 @@ exports.getProducts = (req, res, next) => {
     });
 };
 
-exports.getProduct = async (req, res, next) => {
-  try {
-    const productId = req.params.productId;
-    Product.findById(productId).then((product) => {
+exports.getProduct = (req, res, next) => {
+  const productId = req.params.productId;
+  Product.findById(productId)
+    .then((product) => {
+      if (!product) {
+        return res.redirect("/products");
+      }
       return res.render("shop/product-detail", {
         product,
         pageTitle: product.title,
         path: "/products",
       });
+    })
+    .catch((err) => {
+      const error = new Error(err);
+      error.httpStatusCode = 404;
+      return next(error);
     });
-  } catch (err) {
-    const error = new Error(err);
-    error.httpStatusCode = 404;
-    return next(error);
-  }
 };
 
 exports.getIndex = (req, res, next) => {
@@ -189,7 +192,9 @@ exports.postCheckout = (req, res, next) => {
           email: userEmail,
           amount,
           reference: `order-${order._id}-${Date.now()}`,
-          callback_url: `${req.protocol}://${req.get("host")}/payment/verify`,
+          callback_url: `${
+            process.env.API_URL || `${req.protocol}://${req.get("host")}`
+          }/payment/verify`,
           metadata: {
             // cancel_action: "https://your-cancel-url.com",
             order_status: order.status,
@@ -200,7 +205,7 @@ exports.postCheckout = (req, res, next) => {
 
         console.log("this is the data to be attached to feth body", data);
 
-        fetch("https://api.paystack.co/transaction/initialize", {
+        return fetch("https://api.paystack.co/transaction/initialize", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
@@ -209,7 +214,7 @@ exports.postCheckout = (req, res, next) => {
           },
           body: JSON.stringify(data),
         })
-          .then((res) => res.json())
+          .then((response) => response.json())
           .then((result) => {
             console.log("authorization url data", result);
             if (result.status) {
@@ -217,8 +222,8 @@ exports.postCheckout = (req, res, next) => {
               order.paymentRef = result.data.reference;
               return order
                 .save()
-                .then((order) => {
-                  req.user.clearCart();
+                .then(() => {
+                  return req.user.clearCart();
                 })
                 .then(() => {
                   console.log("successfully placed an order and cleared cart!");
@@ -299,14 +304,19 @@ exports.getInvoice = (req, res, next) => {
       }
 
       const invoiceName = `invoice-${orderId}.pdf`;
-      const invoicePath = path.join("invoices", invoiceName);
+      const invoicePath = path.join(__dirname, "..", "invoices", invoiceName);
       const doc = new PDFDocument();
       let totalPrice = 0;
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${invoiceName}"`);
 
-      doc.pipe(fs.createWriteStream(invoicePath));
+      const invoiceFile = fs.createWriteStream(invoicePath);
+      invoiceFile.on("error", (err) =>
+        console.log("Could not save invoice copy:", err.message),
+      );
+
+      doc.pipe(invoiceFile);
       doc.pipe(res);
 
       doc

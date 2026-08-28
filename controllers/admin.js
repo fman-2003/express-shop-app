@@ -58,7 +58,7 @@ exports.postAddProduct = (req, res, next) => {
 
     const product = new Product({
       title,
-      imageUrl: image.path,
+      imageUrl: fileHelper.toWebPath(image.path),
       price,
       description,
       userId,
@@ -123,6 +123,7 @@ exports.postEditProduct = (req, res, next) => {
       editing: true,
       errorMessages: errors.array().map((err) => err.msg),
       product: {
+        _id: prodId,
         title: updatedTitle,
         price: updatedPrice,
         description: updatedDesc,
@@ -133,17 +134,18 @@ exports.postEditProduct = (req, res, next) => {
 
   Product.findById(prodId)
     .then((product) => {
+      if (!product) {
+        return res.redirect("/admin/products");
+      }
       if (product.userId.toString() !== req.user._id.toString()) {
         return res.redirect("/");
       }
-      const updateData = {
-        title: updatedTitle,
-        price: updatedPrice,
-        description: updatedDesc,
-      };
+      product.title = updatedTitle;
+      product.price = updatedPrice;
+      product.description = updatedDesc;
       if (image) {
         fileHelper.deleteFile(product.imageUrl);
-        updateData.imageUrl = image.path;
+        product.imageUrl = fileHelper.toWebPath(image.path);
       }
       return product.save().then(() => res.redirect("/admin/products"));
     })
@@ -176,13 +178,15 @@ exports.postDeleteProduct = (req, res, next) => {
   Product.findById(prodId)
     .then((product) => {
       if (!product) {
-        return next(new Error("Product not found!"));
+        throw new Error("Product not found!");
       }
       fileHelper.deleteFile(product.imageUrl);
       return Product.deleteOne({ userId: req.user._id, _id: prodId });
     })
     .then(() => {
-      req.user.deleteItemFromCart(prodId);
+      return req.user.deleteItemFromCart(prodId);
+    })
+    .then(() => {
       return res.redirect("/admin/products");
     })
     .catch((err) => {

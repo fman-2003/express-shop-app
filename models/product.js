@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 
+const fileHelper = require("../util/file");
+
 const Schema = mongoose.Schema;
 
 const productSchema = new Schema({
@@ -18,6 +20,9 @@ const productSchema = new Schema({
   imageUrl: {
     type: String,
     required: true,
+    // products saved from a Windows machine hold "images\x.png"; serve them
+    // (and delete them) with forward slashes like everything else
+    get: (value) => (value ? fileHelper.toWebPath(value) : value),
   },
   userId: {
     type: Schema.Types.ObjectId,

@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
 const mongoose = require("mongoose");
 const session = require("express-session");
 const MongoDBStore = require("connect-mongodb-session")(session);
@@ -34,7 +35,13 @@ const store = new MongoDBStore({
   uri: MONGODB_URI,
   collection: "sessions",
 });
+store.on("error", (err) => console.log("SESSION STORE ERROR:", err));
 const csrfProtection = csrf();
+
+// Uploads and generated invoices are written to these folders, so they have to
+// exist before the first request lands (a fresh deploy may not ship them).
+fs.mkdirSync(path.join(__dirname, "images"), { recursive: true });
+fs.mkdirSync(path.join(__dirname, "invoices"), { recursive: true });
 
 const fileFilter = (req, file, cb) => {
   if (
@@ -76,8 +83,10 @@ app.use(
     store,
     cookie: {
       maxAge: 1000 * 60 * 60 * 24,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      // "auto" + "trust proxy" => Secure over https (Render), plain over http
+      // (local). A hard-coded true drops the cookie on http, which breaks csrf.
+      secure: "auto",
+      sameSite: "lax",
       httpOnly: true,
     },
   }),
@@ -121,9 +130,19 @@ app.use((req, res, next) => {
 app.use((error, req, res, next) => {
   console.log("Error caught:", error);
 
+  if (res.headersSent) {
+    return next(error);
+  }
+
   const isAuthenticated = req.session?.isLoggedIn || false;
 
-  const statusCode = error.httpStatusCode || 500;
+  // csurf rejects a request before res.locals.csrfToken is set, and the error
+  // views include the navigation which reads it.
+  res.locals.isAuthenticated = isAuthenticated;
+  res.locals.csrfToken = res.locals.csrfToken || "";
+
+  const statusCode =
+    error.code === "EBADCSRFTOKEN" ? 403 : error.httpStatusCode || 500;
 
   res.status(statusCode).render("500", {
     pageTitle: "Error",
@@ -166,9 +185,12 @@ app.use((error, req, res, next) => {
 //   .catch((err) => console.log(err));
 
 mongoose
-  .connect(MONGODB_URI, { tls: true, tlsAllowInvalidCertificates: true })
+  .connect(MONGODB_URI, {
+    tls: true,
+    tlsAllowInvalidCertificates: process.env.NODE_ENV !== "production",
+  })
   .then(() => {
-    app.listen(process.env.PORT || 3000);
+    app.listen(process.env.PORT || 3002);
   })
   .then(() => console.log("CONNECTED TO MONGODB!"))
   .catch((err) => console.log(err));

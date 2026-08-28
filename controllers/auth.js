@@ -76,6 +76,16 @@ exports.postLogin = async (req, res, next) => {
     }
     const user = await User.findOne({ email });
 
+    if (!user) {
+      return res.status(422).render("auth/login", {
+        path: "/login",
+        pageTitle: "Login",
+        errorMessages: ["Invalid email or password."],
+        oldInput: { email: email, password: password },
+        validationErrors: [],
+      });
+    }
+
     // if (!user) {
     //   req.flash("error", "Invalid email or password.");
     //   userExist = false;
@@ -147,13 +157,17 @@ exports.postSignup = (req, res, next) => {
       if (!result) {
         return;
       }
-      res.redirect("/login");
-      return resend.emails.send({
-        from: "onboarding@resend.dev",
-        to: email,
-        subject: "Welcome! Your account has been created.",
-        html: `<p>Hi <strong>${name}</strong>, welcome aboard! Your account has been successfully created.</p>`,
-      });
+      return resend.emails
+        .send({
+          from: "onboarding@resend.dev",
+          to: email,
+          subject: "Welcome! Your account has been created.",
+          html: `<p>Hi <strong>${name}</strong>, welcome aboard! Your account has been successfully created.</p>`,
+        })
+        .catch((err) => console.log("Welcome email failed:", err));
+    })
+    .then(() => {
+      return res.redirect("/login");
     })
     .catch((err) => {
       // res.redirect("/500")
@@ -206,24 +220,28 @@ exports.postReset = (req, res, next) => {
       .then((user) => {
         if (!user) {
           req.flash("error", "No account with this email found.");
-          return res.redirect("/reset");
+          return null;
         }
         user.resetToken = token;
         user.resetTokenExpirationTime = Date.now() + 3600000;
         return user.save();
       })
       .then((user) => {
-        // if (!user) return;
-        res.redirect("/");
-        return resend.emails.send({
-          from: "onboarding@resend.dev",
-          to: user.email,
-          subject: "Password Reset",
-          html: `<h2>Hi <strong>${user.name}</strong>, click the link below to reset your password.</h2>
-              <p><a href="http://localhost:3000/reset/${user.resetToken}" >Click here</a> to reset your password. 
+        if (!user) {
+          return res.redirect("/reset");
+        }
+        return resend.emails
+          .send({
+            from: "onboarding@resend.dev",
+            to: user.email,
+            subject: "Password Reset",
+            html: `<h2>Hi <strong>${user.name}</strong>, click the link below to reset your password.</h2>
+              <p><a href="${process.env.API_URL}/reset/${user.resetToken}" >Click here</a> to reset your password. 
               If it was not you that requested for this passsword reset, ignore this email.</p>
             `,
-        });
+          })
+          .catch((err) => console.log("Password reset email failed:", err))
+          .then(() => res.redirect("/"));
       })
       .catch((err) => {
         const error = new Error(err);
@@ -241,6 +259,10 @@ exports.getNewPassword = (req, res, next) => {
     resetTokenExpirationTime: { $gt: Date.now() },
   })
     .then((user) => {
+      if (!user) {
+        req.flash("error", "This reset link is invalid or has expired.");
+        return res.redirect("/reset");
+      }
       let errorMessage = req.flash("error");
       if (errorMessage.length > 0) {
         errorMessage = errorMessage[0];
@@ -274,11 +296,18 @@ exports.postNewPassword = (req, res, next) => {
     _id: userId,
   })
     .then((user) => {
+      if (!user) {
+        return null;
+      }
       foundUser = user;
       return bcrypt.hash(newPassword, 12);
       // .catch((err) => console.log(err));
     })
     .then((hashedPassword) => {
+      if (!hashedPassword) {
+        req.flash("error", "This reset link is invalid or has expired.");
+        return res.redirect("/reset");
+      }
       foundUser.password = hashedPassword;
       foundUser.resetToken = undefined;
       foundUser.resetTokenExpirationTime = undefined;
